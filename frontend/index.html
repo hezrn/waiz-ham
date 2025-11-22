@@ -120,6 +120,7 @@
 
     function renderView() {
       switch(state.view) {
+        case 'landing': return renderLandingView();
         case 'items': return renderItemsView();
         case 'requests': return renderRequestsView();
         case 'messages': return renderMessagesView();
