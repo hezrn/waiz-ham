@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Waiz - Eco Marketplace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    * { box-sizing: border-box; }
+    .fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .slide-in-right { animation: slideInRight 0.3s ease-out; }
+    @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    .chat-bubble { max-width: 80%; word-wrap: break-word; }
+    .scroll-smooth { scroll-behavior: smooth; }
+    .hover-lift { transition: transform 0.2s ease; }
+    .hover-lift:hover { transform: translateY(-2px); }
+  </style>
+ </head>
+ <body class="scroll-smooth bg-[#f0f9f4] text-[#1e3a2a]">
+  <div id="app"></div>
+
+  <script>
+  try {
+    const COLORS = {
+      primary: '#2d6a4f',
+      accent: '#f4a261',
+      bg: '#f0f9f4',
+      surface: '#ffffff',
+      text: '#1e3a2a'
+    };
+
+    let state = {
+      user: JSON.parse(localStorage.getItem('waiz_user') || 'null'),
+      token: localStorage.getItem('waiz_token') || null,
+      view: 'home',
+      chatOpen: false,
+      chatMessages: []
+    };
+
+    function api(path, opts = {}) {
+      opts.headers = opts.headers || {};
+      opts.headers['Content-Type'] = 'application/json';
+      if (state.token) opts.headers['Authorization'] = 'Bearer ' + state.token;
+      return fetch('/api' + path, opts).then(r => r.json());
+    }
+
+    function setUser(user, token) {
+      state.user = user;
+      state.token = token;
+      if (user) {
+        localStorage.setItem('waiz_user', JSON.stringify(user));
+        localStorage.setItem('waiz_token', token);
+      } else {
+        localStorage.removeItem('waiz_user');
+        localStorage.removeItem('waiz_token');
+      }
+      render();
+    }
+
+    function render() {
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="min-h-screen" style="background:${COLORS.bg}; color:${COLORS.text};">
+          <header style="background:${COLORS.surface}; border-bottom:2px solid ${COLORS.primary}20;" class="p-4 shadow-sm">
+            <div class="max-w-7xl mx-auto flex justify-between items-center">
+              <div class="flex items-center gap-3">
+                <div style="background:linear-gradient(135deg, ${COLORS.primary}, ${COLORS.accent});" class="w-10 h-10 rounded-lg flex items-center justify-center">♻️</div>
+                <div>
+                  <div class="font-bold text-lg">Waiz</div>
+                  <div class="text-xs" style="color:${COLORS.text}80">Eco Marketplace — Baguio</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-4">
+                ${state.user ? `<div class="text-sm">👋 ${state.user.name}</div><button id="logout-btn" class="text-sm" style="color:${COLORS.primary}">Logout</button>` : `<button id="login-nav" class="px-4 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Login / Sign Up</button>`}
+                <button id="chat-toggle" class="w-12 h-12 rounded-full flex items-center justify-center" style="background:linear-gradient(135deg, ${COLORS.primary}, ${COLORS.accent}); color:${COLORS.surface}">${state.chatOpen ? '✕' : '🤖'}</button>
+              </div>
+            </div>
+          </header>
+
+          <div class="max-w-7xl mx-auto flex pt-6 pb-12 gap-6 px-4">
+            <aside class="w-64 bg-white p-4 rounded-lg shadow-sm" style="border-right:2px solid ${COLORS.primary}20;">
+              <nav class="flex flex-col gap-2">
+                <button class="text-left px-3 py-2 rounded hover:bg-[${COLORS.primary}10]" data-view="home">🏠 Home Feed</button>
+                <button class="text-left px-3 py-2 rounded hover:bg-[${COLORS.primary}10]" data-view="items">📦 Items</button>
+                <button class="text-left px-3 py-2 rounded hover:bg-[${COLORS.primary}10]" data-view="requests">📋 Requests</button>
+                <button class="text-left px-3 py-2 rounded hover:bg-[${COLORS.primary}10]" data-view="messages">💬 Messages</button>
+                <button class="text-left px-3 py-2 rounded hover:bg-[${COLORS.primary}10]" data-view="rates">💰 Rate List</button>
+                <button class="text-left px-3 py-2 rounded hover:bg-[${COLORS.primary}10]" data-view="profile">👤 Profile</button>
+              </nav>
+            </aside>
+
+            <main class="flex-1">
+              ${renderView()}
+            </main>
+          </div>
+
+          ${renderChatPanel()}
+        </div>
+      `;
+
+      attachLayoutHandlers();
+    }
+
+    function attachLayoutHandlers() {
+      document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', (e) => {
+        state.view = e.currentTarget.getAttribute('data-view');
+        render();
+        // ensure view-specific data loads after navigation
+        setTimeout(() => afterRender().catch(err => console.error(err)), 0);
+      }));
+      const loginNav = document.getElementById('login-nav');
+      if (loginNav) loginNav.addEventListener('click', showAuth);
+      const logoutBtn = document.getElementById('logout-btn');
+      if (logoutBtn) logoutBtn.addEventListener('click', () => { setUser(null, null); state.view = 'home'; });
+      document.getElementById('chat-toggle')?.addEventListener('click', () => { state.chatOpen = !state.chatOpen; render(); setTimeout(() => afterRender().catch(err => console.error(err)), 0); });
+    }
+
+    function renderView() {
+      switch(state.view) {
+        case 'items': return renderItemsView();
+        case 'requests': return renderRequestsView();
+        case 'messages': return renderMessagesView();
+        case 'rates': return renderRatesView();
+        case 'profile': return renderProfileView();
+        default: return renderHomeView();
+      }
+    }
+
+    function renderHomeView() {
+      return `<div class="bg-white p-6 rounded-lg shadow-sm"> <div class="flex justify-between items-center mb-4"><h2 class="text-xl font-bold">Home Feed</h2><div><button id="new-post-btn" class="px-3 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">+ Create Post</button></div></div><div id="home-items"></div> </div>`;
+    }
+
+    async function loadHome() {
+      const container = document.getElementById('home-items');
+      if (!container) return;
+      container.innerHTML = 'Loading...';
+      const res = await api('/feed');
+      if (res && res.ok) {
+        // collect image list for lightbox navigation
+        window._feedImages = [];
+        container.innerHTML = res.feed.map((post, idx) => {
+          if (post.type === 'item') {
+            const thumb = post.thumb_path || post.image_path || '';
+            if (thumb) window._feedImages.push(thumb);
+            return `
+              <div class="p-4 rounded mb-3" style="border:1px solid ${COLORS.primary}20;">
+                <div class="flex justify-between items-start gap-4">
+                  <div class="flex-1">
+                    ${thumb ? `<img src="${thumb}" class="feed-thumb w-40 h-28 object-cover rounded mb-2 cursor-pointer" data-src="${thumb}" data-index="${window._feedImages.length-1}">` : ''}
+                    <div class="font-semibold">${post.title}</div>
+                    <div class="text-sm text-[${COLORS.text}80]">${post.body || ''}</div>
+                    <div class="text-xs mt-2">Seller: ${post.actor_name || 'Unknown'}</div>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-lg font-bold" style="color:${COLORS.primary}">${post.meta || ''}</div>
+                    <div class="mt-2"><button class="contact-btn px-3 py-1 rounded" data-seller="${post.actor_id || ''}" data-postid="${post.id}">Contact</button></div>
+                  </div>
+                </div>
+              </div>`;
+          } else {
+            // request
+            return `
+              <div class="p-4 rounded mb-3" style="border:1px solid ${COLORS.primary}20; background:#fffef6;">
+                <div class="flex justify-between items-start gap-4">
+                  <div class="flex-1">
+                    <div class="font-semibold">Collection Request: ${post.title}</div>
+                    <div class="text-sm text-[${COLORS.text}80]">${post.body || ''}</div>
+                    <div class="text-xs mt-2">Requested by: ${post.actor_name || 'Unknown'} • ${post.meta || ''}</div>
+                  </div>
+                  <div class="text-right">
+                    <div class="mt-2"><button class="offer-help px-3 py-1 rounded" data-requestid="${post.id}" data-owner="${post.actor_id || ''}">Offer Help</button></div>
+                  </div>
+                </div>
+              </div>`;
+          }
+        }).join('');
+        // wire contact / offer buttons
+        document.querySelectorAll('.contact-btn').forEach(b=>b.addEventListener('click', (e)=>{
+          const seller = e.currentTarget.getAttribute('data-seller');
+          state.view = 'messages'; render(); setTimeout(()=>openConversation(seller), 50);
+        }));
+        // image preview click opens modal
+        document.querySelectorAll('.feed-thumb').forEach(img => img.addEventListener('click', (e)=> showImageModal(parseInt(e.currentTarget.getAttribute('data-index')))));
+        document.querySelectorAll('.offer-help').forEach(b=>b.addEventListener('click', (e)=>{
+          const owner = e.currentTarget.getAttribute('data-owner');
+          if (!state.user) { alert('Please login to offer help'); state.view='messages'; render(); setTimeout(()=>showAuth(),50); return; }
+          // open conversation with request owner
+          state.view = 'messages'; render(); setTimeout(()=>openConversation(owner), 50);
+        }));
+      } else container.innerHTML = 'Failed to load feed';
+    }
+
+    function renderItemsView() {
+      const isJunkshop = state.user && state.user.user_type === 'junkshop';
+      return `
+        <div class="bg-white p-6 rounded-lg shadow-sm">
+          <div class="flex justify-between items-center mb-4"><h2 class="text-xl font-bold">${isJunkshop ? 'My Items' : 'Browse Items'}</h2>${isJunkshop ? '<button id="add-item-btn" class="px-3 py-2 rounded" style="background:'+COLORS.primary+'; color:'+COLORS.surface+'">+ Add Item</button>' : ''}</div>
+          <div id="items-list">Loading...</div>
+        </div>
+      `;
+    }
+
+    async function loadItems() {
+      const list = document.getElementById('items-list');
+      if (!list) return;
+      const res = await api('/items');
+      if (res.ok) {
+        list.innerHTML = res.items.map(i => `
+          <div class="p-4 rounded mb-3" style="border:1px solid ${COLORS.primary}20;">
+            <div class="flex justify-between items-center">
+              <div>
+                <div class="font-semibold">${i.title}</div>
+                <div class="text-sm text-[${COLORS.text}80]">${i.category} • ${i.seller_name || 'Unknown'}</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="text-lg font-bold" style="color:${COLORS.primary}">${i.price}</div>
+                ${state.user && state.user.user_type === 'household' ? '<button class="contact-btn px-3 py-1 rounded" data-seller="'+(i.seller_id||'')+'">Contact</button>' : (state.user ? '' : '<button class="contact-btn px-3 py-1 rounded" data-seller="'+(i.seller_id||'')+'">Contact</button>')}
+              </div>
+            </div>
+          </div>`).join('');
+        document.getElementById('add-item-btn')?.addEventListener('click', showAddItemForm);
+        document.querySelectorAll('.contact-btn').forEach(b=>b.addEventListener('click', (e)=>{
+          const seller = e.currentTarget.getAttribute('data-seller');
+          // switch to messages view and open conversation with seller
+          state.view = 'messages';
+          render();
+          setTimeout(() => { try { openConversation(seller); } catch(err){ console.error(err); } }, 50);
+        }));
+      } else list.innerHTML = 'Failed to load items';
+    }
+
+    function showAddItemForm() {
+      const html = `
+        <div class="p-4 rounded mb-3" style="border:1px solid ${COLORS.primary}20;">
+          <form id="add-item-form" class="space-y-3">
+            <input name="title" required class="w-full px-3 py-2 border rounded" placeholder="Title">
+            <input name="price" class="w-full px-3 py-2 border rounded" placeholder="Price">
+            <input name="category" class="w-full px-3 py-2 border rounded" placeholder="Category">
+            <textarea name="description" class="w-full px-3 py-2 border rounded" placeholder="Description"></textarea>
+            <div class="flex gap-2"><button class="px-4 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Add</button><button type="button" id="cancel-add" class="px-4 py-2 rounded border">Cancel</button></div>
+          </form>
+        </div>`;
+      document.getElementById('items-list').insertAdjacentHTML('afterbegin', html);
+      document.getElementById('cancel-add')?.addEventListener('click', () => loadItems());
+      document.getElementById('add-item-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = e.currentTarget;
+        const data = { title: f.title.value, price: f.price.value, category: f.category.value, description: f.description.value, seller_id: state.user.id };
+        const res = await api('/items', { method: 'POST', body: JSON.stringify(data) });
+        if (res.ok) { alert('Item added'); loadItems(); } else alert('Failed');
+      });
+    }
+
+    function renderRequestsView() {
+      return `
+        <div class="bg-white p-6 rounded-lg shadow-sm">
+          <div class="flex justify-between items-center mb-4"><h2 class="text-xl font-bold">My Requests</h2>${state.user && state.user.user_type === 'household' ? '<button id="new-request-btn" class="px-3 py-2 rounded" style="background:'+COLORS.primary+'; color:'+COLORS.surface+'">+ New Request</button>' : ''}</div>
+          <div id="requests-list">Loading...</div>
+        </div>
+      `;
+    }
+
+    async function loadRequests() {
+      const list = document.getElementById('requests-list');
+      if (!list) return;
+      const uid = state.user ? state.user.id : '';
+      const res = await api('/requests?userId=' + encodeURIComponent(uid));
+      if (res.ok) {
+        list.innerHTML = res.requests.map(r => `<div class="p-3 rounded mb-2" style="border-left:4px solid ${r.status==='Completed'?COLORS.accent:COLORS.primary};"><div class="font-semibold">${r.type} • ${r.status}</div><div class="text-sm text-[${COLORS.text}80]">${r.items}</div><div class="text-xs">📍 ${r.address} • ${r.date || ''}</div></div>`).join('');
+        document.getElementById('new-request-btn')?.addEventListener('click', showNewRequestForm);
+      } else list.innerHTML = 'Failed to load requests';
+    }
+
+    function showNewRequestForm() {
+      const html = `
+        <div class="p-4 rounded mb-3" style="border:1px solid ${COLORS.primary}20;">
+          <form id="new-request-form" class="space-y-3">
+            <input name="items" required class="w-full px-3 py-2 border rounded" placeholder="Items / notes">
+            <input name="address" required class="w-full px-3 py-2 border rounded" placeholder="Pickup address">
+            <input name="date" type="date" class="w-full px-3 py-2 border rounded">
+            <div class="flex gap-2"><button class="px-4 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Create Request</button><button type="button" id="cancel-req" class="px-4 py-2 rounded border">Cancel</button></div>
+          </form>
+        </div>`;
+      document.getElementById('requests-list').insertAdjacentHTML('afterbegin', html);
+      document.getElementById('cancel-req')?.addEventListener('click', () => loadRequests());
+      document.getElementById('new-request-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = e.currentTarget;
+        const data = { user_id: state.user.id, items: f.items.value, address: f.address.value, date: f.date.value };
+        const res = await api('/requests', { method: 'POST', body: JSON.stringify(data) });
+        if (res.ok) { alert('Request created'); loadRequests(); } else alert('Failed');
+      });
+    }
+
+    function renderMessagesView() {
+      return `
+        <div class="bg-white p-6 rounded-lg shadow-sm">
+          <h2 class="text-xl font-bold mb-4">Messages</h2>
+          <div id="messages-area">Loading...</div>
+        </div>
+      `;
+    }
+
+    async function loadMessages() {
+      const area = document.getElementById('messages-area');
+        if (!area) return;
+        const res = await api('/messages');
+        const messages = (res && (res.messages || Array.isArray(res))) ? (res.messages || res) : [];
+        const list = document.getElementById('messages-list');
+        const byPartner = {};
+        messages.forEach(m => {
+          const myId = state.user ? state.user.id : null;
+          let partnerId = m.from_id;
+          if (myId && m.from_id === myId) partnerId = m.to_id;
+          if (!byPartner[partnerId]) byPartner[partnerId] = [];
+          byPartner[partnerId].push(m);
+        });
+        area.innerHTML = Object.keys(byPartner).map(pid => {
+          const msgs = byPartner[pid];
+          const last = msgs[msgs.length-1];
+          const partnerName = (state.user && last.from_id === state.user.id) ? last.to_name : (last.from_name || 'Contact');
+          return `<div class="p-3 rounded mb-2" style="border:1px solid ${COLORS.primary}20;"><div class="font-semibold">${partnerName}</div><div class="text-sm mt-2">${(last.text||'').slice(0,80)}</div><div class="mt-2"><button class="open-chat px-3 py-1 rounded" data-partner="${pid}">Open</button></div></div>`;
+        }).join('');
+        document.querySelectorAll('.open-chat').forEach(b => b.addEventListener('click', (e) => openConversation(e.currentTarget.getAttribute('data-partner'))));
+    }
+
+    function showCreatePost() {
+      const main = document.querySelector('main');
+      main.innerHTML = `
+        <div class="bg-white p-6 rounded-lg shadow-sm max-w-md mx-auto">
+          <h2 class="text-xl font-bold mb-3">Create Post</h2>
+          <form id="create-post-form" class="space-y-3" enctype="multipart/form-data">
+            <select name="post_type" class="w-full px-3 py-2 border rounded"><option value="item">Item for Sale</option><option value="request">Collection Request</option></select>
+            <input name="title" class="w-full px-3 py-2 border rounded" placeholder="Title">
+            <textarea name="body" class="w-full px-3 py-2 border rounded" placeholder="Description or items"></textarea>
+            <input name="price" class="w-full px-3 py-2 border rounded" placeholder="Price (for items)">
+            <div>
+              <input type="file" id="post-image" name="image" accept="image/*">
+              <div id="image-preview" class="mt-2"></div>
+            </div>
+            <input name="address" class="w-full px-3 py-2 border rounded" placeholder="Address (for requests)">
+            <div class="flex gap-2"><button class="px-4 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Post</button><button type="button" id="cancel-post" class="px-4 py-2 rounded border">Cancel</button></div>
+          </form>
+        </div>`;
+      document.getElementById('cancel-post')?.addEventListener('click', () => { state.view='home'; render(); setTimeout(()=>afterRender(), 0); });
+        const imgInput = document.getElementById('post-image');
+        const imgPreview = document.getElementById('image-preview');
+        if (imgInput) imgInput.addEventListener('change', (ev) => {
+          const f = ev.currentTarget.files && ev.currentTarget.files[0];
+          if (!f) { imgPreview.innerHTML = ''; return; }
+          const url = URL.createObjectURL(f);
+          imgPreview.innerHTML = `<img src="${url}" class="w-48 h-32 object-cover rounded" alt="preview">`;
+        });
+
+        document.getElementById('create-post-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!state.user) { alert('Please login to post'); return; }
+        const f = e.currentTarget;
+        const fd = new FormData(f);
+        const type = fd.get('post_type');
+        if (type === 'item') {
+          // upload item via multipart to /api/items
+          fd.append('seller_id', state.user.id);
+          const resp = await fetch('/api/items', { method: 'POST', body: fd });
+          const data = await resp.json();
+          if (data.ok) { alert('Item posted'); state.view='home'; render(); setTimeout(()=>afterRender(), 0); } else alert('Failed to post');
+        } else {
+          // create request
+          const payload = { user_id: state.user.id, type: fd.get('title') || 'Collection', items: fd.get('body') || '', address: fd.get('address') || '' };
+          const res = await api('/requests', { method: 'POST', body: JSON.stringify(payload) });
+          if (res.ok) { alert('Request posted'); state.view='home'; render(); setTimeout(()=>afterRender(), 0); } else alert('Failed to create request');
+        }
+      });
+    }
+
+    function openConversation(partnerId) {
+      const html = `
+        <div id="conv" class="p-3 rounded" style="border:1px solid ${COLORS.primary}20;">
+          <div id="conv-messages" style="height:300px; overflow:auto;"></div>
+          <form id="conv-form" class="mt-2 flex gap-2"><input name="text" autocomplete="off" class="flex-1 px-3 py-2 border rounded" placeholder="Type a message..."><button class="px-3 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Send</button></form>
+        </div>`;
+      document.getElementById('messages-area').innerHTML = html;
+      loadConversation(partnerId);
+      document.getElementById('conv-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!state.user) { alert('Please login to send messages'); return; }
+        const form = e.currentTarget;
+        const input = form.querySelector('input[name="text"]');
+        const txt = input ? input.value.trim() : '';
+        if (!txt) return;
+        const payload = { from_id: state.user.id, to_id: partnerId, text: txt };
+        // optimistic append: show locally immediately, then POST
+        const container = document.getElementById('conv-messages');
+        const nowLabel = new Date().toLocaleString();
+        if (container) container.insertAdjacentHTML('beforeend', `<div class="mb-2 text-right"><div class="inline-block px-3 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface};">${escapeHtml(txt)}<div class="text-xs text-[${COLORS.surface}80] mt-1">${nowLabel}</div></div></div>`);
+        if (container) { container.scrollTop = container.scrollHeight; }
+        const resp = await api('/messages', { method: 'POST', body: JSON.stringify(payload) });
+        if (resp && resp.ok) { if (input) input.value = ''; /* refresh to get canonical data (timestamps, names) */ setTimeout(()=>loadConversation(partnerId), 250); } else { alert('Failed to send message'); }
+      });
+    }
+
+    async function loadConversation(partnerId) {
+      try {
+        const res = await api('/messages');
+        const messages = (res && (res.messages || Array.isArray(res))) ? (res.messages || res) : [];
+        let msgs = [];
+        if (state.user) {
+          // show messages between current user and partner
+          msgs = messages.filter(m => (m.from_id === partnerId && m.to_id === state.user.id) || (m.to_id === partnerId && m.from_id === state.user.id) || (m.from_id === state.user.id && m.to_id === partnerId) || (m.to_id === state.user.id && m.from_id === partnerId));
+        } else {
+          // anonymous: show any messages that involve the partnerId
+          msgs = messages.filter(m => m.from_id === partnerId || m.to_id === partnerId);
+        }
+        msgs = msgs.slice(-200);
+        const container = document.getElementById('conv-messages');
+        container.innerHTML = msgs.map(m => {
+          const mine = state.user && m.from_id === state.user.id;
+          const bg = mine ? COLORS.primary : '#e6f0ea';
+          const color = mine ? COLORS.surface : COLORS.text;
+          const ts = m.created_at ? (new Date(m.created_at)).toLocaleString() : '';
+          return `<div class="mb-2" style="text-align:${mine ? 'right' : 'left'}"><div class="inline-block px-3 py-2 rounded chat-bubble" style="background:${bg}; color:${color};">${escapeHtml(m.text)}${ts?`<div class=\"text-xs mt-1\" style=\"color:${mine?COLORS.surface:COLORS.text}80\">${ts}</div>`:''}</div></div>`;
+        }).join('');
+        // scroll to bottom after render
+        container.scrollTop = container.scrollHeight;
+      } catch (err) {
+        console.error('Failed to load conversation', err);
+      }
+    }
+
+    // small helper to avoid XSS in inserted HTML (safe for demo)
+    function escapeHtml(str){
+      if(!str) return '';
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+    function showImageModal(index) {
+      const imgs = window._feedImages || [];
+      if (!imgs.length) return;
+      let i = typeof index === 'number' ? index : imgs.indexOf(index || '');
+      if (i < 0) i = 0;
+      const existing = document.getElementById('image-modal');
+      if (existing) existing.remove();
+      const modal = document.createElement('div');
+      modal.id = 'image-modal';
+      modal.style.position = 'fixed';
+      modal.style.left = 0;
+      modal.style.top = 0;
+      modal.style.width = '100%';
+      modal.style.height = '100%';
+      modal.style.background = 'rgba(0,0,0,0.6)';
+      modal.style.display = 'flex';
+      modal.style.alignItems = 'center';
+      modal.style.justifyContent = 'center';
+      modal.style.zIndex = 9999;
+      modal.innerHTML = `
+        <div style="position:relative; max-width:90%; max-height:90%; display:flex; align-items:center;">
+          <button id="img-prev" style="position:absolute; left:-48px; background:none; border:none; color:white; font-size:32px;">◀</button>
+          <div style="max-width:100%; max-height:100%;"><img id="img-full" src="${imgs[i]}" style="max-width:100%; max-height:100%; border-radius:8px;"></div>
+          <button id="img-next" style="position:absolute; right:-48px; background:none; border:none; color:white; font-size:32px;">▶</button>
+        </div>`;
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+      document.body.appendChild(modal);
+      function setIndex(n) {
+        i = (n + imgs.length) % imgs.length;
+        document.getElementById('img-full').src = imgs[i];
+      }
+      document.getElementById('img-prev').addEventListener('click', (e) => { e.stopPropagation(); setIndex(i-1); });
+      document.getElementById('img-next').addEventListener('click', (e) => { e.stopPropagation(); setIndex(i+1); });
+      document.addEventListener('keydown', function onKey(ev) { if (ev.key === 'Escape') { modal.remove(); document.removeEventListener('keydown', onKey); } if (ev.key === 'ArrowLeft') setIndex(i-1); if (ev.key === 'ArrowRight') setIndex(i+1); });
+    }
+
+    function renderRatesView() {
+      return `<div class="bg-white p-6 rounded-lg shadow-sm"><h2 class="text-xl font-bold mb-3">Rate List</h2><div id="rates-list">Loading...</div></div>`;
+    }
+
+    async function loadRates() {
+      const el = document.getElementById('rates-list');
+      if (!el) return;
+      try {
+        const res = await api('/rates');
+        const rates = Array.isArray(res) ? res : (res.rates || res.data || []);
+        el.innerHTML = rates.map(r => `<div class="p-3 rounded mb-2" style="border:1px solid ${COLORS.primary}20"><div class="font-semibold">${r.material}</div><div class="text-lg" style="color:${COLORS.primary}">${r.price}</div></div>`).join('');
+      } catch (err) {
+        el.innerHTML = 'Failed to load rates';
+      }
+    }
+
+    function renderProfileView() {
+      if (!state.user) return `<div class="bg-white p-6 rounded-lg shadow-sm">Please login to view profile</div>`;
+      return `
+        <div class="bg-white p-6 rounded-lg shadow-sm max-w-2xl mx-auto">
+          <div class="flex items-center gap-6 mb-4">
+            <div class="w-24 h-24 rounded-full flex items-center justify-center text-4xl" style="background:linear-gradient(135deg, ${COLORS.primary}, ${COLORS.accent});">${state.user.user_type === 'junkshop' ? '🏪' : '🏠'}</div>
+            <div>
+              <div class="text-2xl font-bold">${state.user.name}</div>
+              <div class="text-sm text-[${COLORS.text}80]">${state.user.user_type.charAt(0).toUpperCase() + state.user.user_type.slice(1)}</div>
+              <div class="mt-2"><button id="edit-profile" class="px-3 py-1 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Edit Profile</button></div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <div class="text-sm text-[${COLORS.text}80]">Email</div>
+              <div class="font-medium">${state.user.email}</div>
+            </div>
+            <div>
+              <div class="text-sm text-[${COLORS.text}80]">Phone</div>
+              <div class="font-medium"><a href="tel:${state.user.phone}" style="color:${COLORS.primary}">${state.user.phone}</a></div>
+            </div>
+            <div class="col-span-2">
+              <div class="text-sm text-[${COLORS.text}80]">Address</div>
+              <div class="font-medium">📍 ${state.user.address}</div>
+            </div>
+          </div>
+
+          <div class="mt-6 bg-[#f8faf7] p-4 rounded">
+            <div class="font-semibold">Rating</div>
+            <div class="text-sm text-[${COLORS.text}80]">4.8 • Trusted by local community</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderChatPanel() {
+      if (!state.chatOpen) return '';
+      return `
+        <div class="fixed bottom-6 right-6 w-96 h-[480px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+          <div style="background:linear-gradient(135deg, ${COLORS.primary}, ${COLORS.accent}); color:${COLORS.surface};" class="p-4">Waiz Assistant 🤖</div>
+          <div id="chat-body" class="p-4 flex-1 overflow-auto"></div>
+          <form id="chat-send" class="p-4 border-t flex gap-2"><input name="q" class="flex-1 px-3 py-2 border rounded"><button class="px-4 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Send</button></form>
+        </div>
+      `;
+    }
+
+    async function loadChatMessages() {
+      const body = document.getElementById('chat-body');
+      if (!body) return;
+      body.innerHTML = `<div class="text-sm" style="color:${COLORS.text}80">Ask me about navigation, rates, requests or messaging.</div>`;
+    }
+
+    function showAuth() {
+      // render a small modal-like inline form in main area
+      const main = document.querySelector('main');
+      main.innerHTML = `
+        <div class="bg-white p-6 rounded-lg shadow-sm max-w-md mx-auto">
+          <h2 class="text-xl font-bold mb-3">Login</h2>
+          <form id="login-form" class="space-y-3">
+            <input name="emailOrPhone" required class="w-full px-3 py-2 border rounded" placeholder="Email or Phone">
+            <input name="password" type="password" required class="w-full px-3 py-2 border rounded" placeholder="Password">
+            <div class="flex gap-2"><button class="px-4 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Login</button><button type="button" id="to-signup" class="px-4 py-2 rounded border">Sign Up</button></div>
+          </form>
+        </div>
+      `;
+      document.getElementById('to-signup')?.addEventListener('click', showSignup);
+      document.getElementById('login-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = e.currentTarget;
+        const payload = { emailOrPhone: f.emailOrPhone.value, password: f.password.value };
+        const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.ok) { setUser(data.user, data.token); alert('Welcome ' + data.user.name); } else alert(data.error || 'Login failed');
+      });
+    }
+
+    function showSignup() {
+      const main = document.querySelector('main');
+      main.innerHTML = `
+        <div class="bg-white p-6 rounded-lg shadow-sm max-w-md mx-auto">
+          <h2 class="text-xl font-bold mb-3">Sign Up</h2>
+          <form id="signup-form" class="space-y-3">
+            <select name="user_type" required class="w-full px-3 py-2 border rounded"><option value="household">Household</option><option value="junkshop">Junkshop</option></select>
+            <input name="name" required class="w-full px-3 py-2 border rounded" placeholder="Full name">
+            <input name="email" type="email" required class="w-full px-3 py-2 border rounded" placeholder="Email">
+            <input name="phone" class="w-full px-3 py-2 border rounded" placeholder="Phone (+63 ...)">
+            <input name="address" class="w-full px-3 py-2 border rounded" placeholder="Address (Baguio)">
+            <input name="password" type="password" required class="w-full px-3 py-2 border rounded" placeholder="Password">
+            <div class="flex gap-2"><button class="px-4 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Create Account</button><button type="button" id="to-login" class="px-4 py-2 rounded border">Back to Login</button></div>
+          </form>
+        </div>
+      `;
+      document.getElementById('to-login')?.addEventListener('click', showAuth);
+      document.getElementById('signup-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = e.currentTarget;
+        const payload = { user_type: f.user_type.value, name: f.name.value, email: f.email.value, phone: f.phone.value, address: f.address.value, password: f.password.value };
+        const res = await fetch('/api/signup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.ok) { setUser(data.user, data.token); alert('Account created — welcome ' + data.user.name); } else alert(data.error || 'Signup failed');
+      });
+    }
+
+    function showEditProfile() {
+      const main = document.querySelector('main');
+      const u = state.user || {};
+      main.innerHTML = `
+        <div class="bg-white p-6 rounded-lg shadow-sm max-w-md mx-auto">
+          <h2 class="text-xl font-bold mb-3">Edit Profile</h2>
+          <form id="edit-profile-form" class="space-y-3">
+            <input name="name" required class="w-full px-3 py-2 border rounded" placeholder="Full name" value="${u.name||''}">
+            <input name="phone" class="w-full px-3 py-2 border rounded" placeholder="Phone (+63 ...)" value="${u.phone||''}">
+            <input name="address" class="w-full px-3 py-2 border rounded" placeholder="Address (Baguio)" value="${u.address||''}">
+            <div class="flex gap-2"><button class="px-4 py-2 rounded" style="background:${COLORS.primary}; color:${COLORS.surface}">Save</button><button type="button" id="cancel-edit" class="px-4 py-2 rounded border">Cancel</button></div>
+          </form>
+        </div>
+      `;
+      document.getElementById('cancel-edit')?.addEventListener('click', () => { state.view = 'profile'; render(); setTimeout(() => afterRender(), 0); });
+      document.getElementById('edit-profile-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = e.currentTarget;
+        const payload = { name: f.name.value, phone: f.phone.value, address: f.address.value };
+        const res = await api('/me', { method: 'PUT', body: JSON.stringify(payload) });
+        if (res && res.ok) {
+          setUser(res.user, state.token);
+          alert('Profile updated');
+          state.view = 'profile';
+          render();
+          setTimeout(() => afterRender(), 0);
+        } else alert('Failed to update profile');
+      });
+    }
+
+    // After render hook to load data for the active view
+    async function afterRender() {
+      if (state.view === 'home') await loadHome();
+      if (state.view === 'items') await loadItems();
+      if (state.view === 'requests') await loadRequests();
+      if (state.view === 'messages') await loadMessages();
+      if (state.view === 'rates') await loadRates();
+      if (state.chatOpen) {
+        await loadChatMessages();
+        document.getElementById('chat-send')?.addEventListener('submit', async (e)=>{
+          e.preventDefault();
+          const q = e.currentTarget.q.value;
+          if(!q) return;
+          const r = await fetch('/api/chatbot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:q})});
+          const d = await r.json();
+          const body = document.getElementById('chat-body');
+          body.insertAdjacentHTML('beforeend', '<div class="mb-2 text-sm">'+(d.reply||'')+'</div>');
+          e.currentTarget.q.value = '';
+        });
+      }
+    }
+
+    // Kickoff: initial render and load data for the active view
+    document.addEventListener('DOMContentLoaded', async () => { render(); await afterRender(); });
+  } catch (err) {
+    console.error('Frontend runtime error', err);
+    document.body.innerHTML = '<div style="padding:20px; font-family:monospace;"><h2>Frontend error</h2><pre>' + (err && err.stack ? err.stack : String(err)) + '</pre></div>';
+    throw err;
+  }
+  </script>
+ </body>
+</html>

@@ -1,0 +1,3 @@
+node_modules/
+server/waiz.db
+.env
